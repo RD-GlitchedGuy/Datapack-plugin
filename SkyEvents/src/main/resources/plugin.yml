@@ -1,0 +1,21 @@
+name: SkyEvents
+version: '1.0'
+main: de.skygames.skyevents.SkyEvents
+api-version: '1.21'
+author: Sky Games
+description: Elo-, Admin- und Event-Befehle mit Datapack-Functions
+commands:
+  elo:
+    description: Führt die Elo-Function aus
+    usage: /elo [toggle]
+  admin:
+    description: Öffnet das Admin-Menü
+    usage: /admin [reload]
+    permission: skyevents.admin
+  event:
+    description: Zeigt die nächsten Events
+    usage: /event [settings]
+permissions:
+  skyevents.admin:
+    description: Zugriff auf /admin und /event settings
+    default: op

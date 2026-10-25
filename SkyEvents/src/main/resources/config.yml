@@ -1,0 +1,97 @@
+# ================== SkyEvents ==================
+# Alle Befehle werden von der Konsole ausgeführt.
+# %player% = Name des Spielers, der den Befehl benutzt hat.
+# Bei Events ohne Spieler wird ein Befehl mit %player% für JEDEN Online-Spieler ausgeführt.
+# Nach Änderungen: /admin reload
+
+zeitzone: "Europe/Berlin"
+datum-format: "dd.MM.yyyy HH:mm"
+keine-rechte: "&cDazu hast du keine Rechte."
+
+# ---------- /elo und /elo toggle ----------
+elo:
+  befehle:
+    - "execute as %player% at @s run function elo:show"
+  toggle-befehle:
+    - "execute as %player% at @s run function elo:toggle"
+
+# ---------- /admin (nur Admins / OPs) ----------
+# aktion (optional): event-settings | events | start:<event-name>
+# schliessen: true  -> Menü schließt nach dem Klick
+admin:
+  titel: "&cAdmin-Menü"
+  groesse: 27
+  knoepfe:
+    tag:
+      slot: 10
+      item: CLOCK
+      name: "&eTag machen"
+      befehle: ["time set day"]
+    wetter:
+      slot: 11
+      item: SUNFLOWER
+      name: "&eWetter klar"
+      befehle: ["weather clear"]
+    funktion:
+      slot: 12
+      item: COMMAND_BLOCK
+      name: "&bEigene Funktion"
+      lore: ["&7Führt admin:beispiel aus"]
+      befehle: ["execute as %player% at @s run function admin:beispiel"]
+    einstellungen:
+      slot: 13
+      item: COMPARATOR
+      name: "&6Event-Einstellungen"
+      aktion: event-settings
+    nether:
+      slot: 15
+      item: NETHERRACK
+      name: "&cNether jetzt öffnen"
+      aktion: "start:nether"
+    end:
+      slot: 16
+      item: END_STONE
+      name: "&5End jetzt öffnen"
+      aktion: "start:end"
+
+# ---------- Events (/event und /event settings) ----------
+# zeit:        wann das Event startet (Format siehe datum-format)
+# befehle:     was beim Start ausgeführt wird (hier deine Datapack-Function eintragen)
+# dimension:   NETHER oder THE_END – wird bis zum Start gesperrt, wenn portal-sperren: true
+# ausgefuehrt: wird vom Plugin gesetzt (true = Event ist schon passiert)
+event-menue-titel: "&6Nächste Events"
+settings-menue-titel: "&cEvent-Einstellungen"
+warnungen-minuten: [60, 10, 5, 1]
+warnung: "%event% &7startet in &e%min% &7Minute(n)!"
+gesperrt: "%event% &cist noch nicht offen! &7Öffnet: &e%zeit%"
+admins-umgehen-sperre: true
+
+events:
+  nether:
+    name: "&cNether-Öffnung"
+    item: NETHERRACK
+    zeit: "01.11.2026 18:00"
+    dimension: NETHER
+    portal-sperren: true
+    nachricht: "%event% &aist jetzt offen!"
+    befehle:
+      - "function events:nether_open"
+    ausgefuehrt: false
+  end:
+    name: "&5End-Öffnung"
+    item: END_STONE
+    zeit: "08.11.2026 18:00"
+    dimension: THE_END
+    portal-sperren: true
+    nachricht: "%event% &aist jetzt offen!"
+    befehle:
+      - "function events:end_open"
+    ausgefuehrt: false
+
+# ---------- Scoreboard "time" (echte Uhrzeit) ----------
+# Werte: Tag, Monat, Jahr, Stunde, Minute
+# Im Datapack z. B.:  execute if score Stunde time matches 18 run ...
+time-scoreboard:
+  aktiv: true
+  sidebar: true
+  titel: "&6⌚ %datum%"
