@@ -1,5 +1,5 @@
 name: SkyEvents
-version: '1.0'
+version: '${version}'
 main: de.skygames.skyevents.SkyEvents
 api-version: '1.21'
 author: Sky Games

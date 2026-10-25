@@ -15,7 +15,14 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.boss.BarColor;
+import org.bukkit.boss.BarStyle;
+import org.bukkit.boss.BossBar;
+import org.bukkit.event.block.Action;
+import org.bukkit.event.player.AsyncPlayerChatEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerPortalEvent;
+import org.bukkit.event.world.PortalCreateEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
@@ -32,9 +39,13 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * SkyEvents – /elo, /elo toggle, /admin, /event, /event settings
@@ -50,6 +61,14 @@ public class SkyEvents extends JavaPlugin implements Listener, TabExecutor {
     private ZoneId zone;
     private DateTimeFormatter fmt;
     private final Set<String> warned = new HashSet<>();
+    private final Map<String, BossBar> bars = new HashMap<>();
+    private final Map<UUID, String> awaitingTime = new ConcurrentHashMap<>();
+
+    @Override
+    public void onDisable() {
+        bars.values().forEach(BossBar::removeAll);
+        bars.clear();
+    }
 
     /** Markiert unsere eigenen Menüs. */
     static class Menu implements InventoryHolder {
@@ -104,6 +123,12 @@ public class SkyEvents extends JavaPlugin implements Listener, TabExecutor {
                 if (!(s instanceof Player p)) { s.sendMessage("Nur für Spieler."); return true; }
                 if (sub.equals("settings")) {
                     if (!admin) { p.sendMessage(c(getConfig().getString("keine-rechte", "&cDazu hast du keine Rechte."))); return true; }
+                    // /event settings <event> <dd.MM.yyyy> <HH:mm>
+                    if (a.length >= 3) {
+                        if (ev(a[1]) == null) { p.sendMessage(c("&cUnbekanntes Event. Möglich: &e" + String.join(", ", eventKeys()))); return true; }
+                        setTime(p, a[1], String.join(" ", java.util.Arrays.copyOfRange(a, 2, a.length)), false);
+                        return true;
+                    }
                     openSettings(p);
                 } else openEvents(p);
             }
@@ -113,6 +138,9 @@ public class SkyEvents extends JavaPlugin implements Listener, TabExecutor {
 
     @Override
     public List<String> onTabComplete(CommandSender s, Command cmd, String l, String[] a) {
+        if (a.length == 2 && cmd.getName().equalsIgnoreCase("event") && a[0].equalsIgnoreCase("settings")
+                && s.hasPermission("skyevents.admin"))
+            return eventKeys().stream().filter(x -> x.startsWith(a[1].toLowerCase())).toList();
         if (a.length != 1) return List.of();
         List<String> options = switch (cmd.getName().toLowerCase()) {
             case "elo" -> List.of("toggle");
@@ -209,7 +237,10 @@ public class SkyEvents extends JavaPlugin implements Listener, TabExecutor {
         if (s.getBoolean("ausgefuehrt")) lore.add("&aIst offen!");
         else if (t == null) lore.add("&7Noch kein Termin");
         else lore.add("&eStartet in &f" + left(Duration.between(now(), t)));
-        if (admin) lore.add("&8Zeit ändern schließt das Event wieder");
+        if (admin) {
+            lore.add("&eKlicken: Zeit im Chat eingeben");
+            lore.add("&8Zeit ändern schließt das Event wieder");
+        }
         ItemStack it = item(s.getString("item", "CLOCK"), s.getString("name", k), lore);
         if (next) {
             ItemMeta meta = it.getItemMeta();
@@ -259,8 +290,15 @@ public class SkyEvents extends JavaPlugin implements Listener, TabExecutor {
         if (!p.hasPermission("skyevents.admin")) { later(p::closeInventory); return; }
         List<String> keys = eventKeys();
         int row = slot / 9, col = slot % 9;
-        if (row >= keys.size() || col == 4) return;
+        if (row >= keys.size()) return;
         String k = keys.get(row);
+        if (col == 4) {
+            awaitingTime.put(p.getUniqueId(), k);
+            later(p::closeInventory);
+            p.sendMessage(c("&7Schreibe die neue Zeit für " + name(k) + " &7in den Chat, z. B. &e"
+                    + now().plusDays(1).withHour(18).withMinute(0).format(fmt) + " &7(oder &cabbrechen&7)."));
+            return;
+        }
         ConfigurationSection s = ev(k);
         LocalDateTime now = now().withSecond(0).withNano(0).plusMinutes(1);
         if (col == 3) {
@@ -299,9 +337,11 @@ public class SkyEvents extends JavaPlugin implements Listener, TabExecutor {
         LocalDateTime now = zdt.toLocalDateTime();
         for (String k : eventKeys()) {
             LocalDateTime t = eventTime(k);
-            if (t == null || ev(k).getBoolean("ausgefuehrt")) continue;
+            if (t == null || ev(k).getBoolean("ausgefuehrt")) { removeBar(k); continue; }
             long sec = Duration.between(now, t).getSeconds();
             if (sec <= 0) { startEvent(k); continue; }
+            int bm = ev(k).getInt("bossbar-minuten");
+            if (bm > 0 && sec <= bm * 60L) showBar(k, sec, bm); else removeBar(k);
             for (int w : getConfig().getIntegerList("warnungen-minuten")) {
                 if (sec <= w * 60L && sec > w * 60L - 60 && warned.add(k + ":" + w)) {
                     Bukkit.broadcastMessage(c(getConfig().getString("warnung", "%event% &7startet in &e%min% &7Minute(n)!")
@@ -323,6 +363,7 @@ public class SkyEvents extends JavaPlugin implements Listener, TabExecutor {
         if (s == null) return;
         s.set("ausgefuehrt", true);
         saveConfig();
+        removeBar(k);
         getLogger().info("Event gestartet: " + k);
         runCommands(s.getStringList("befehle"), null);
         String msg = s.getString("nachricht", "");
@@ -330,22 +371,109 @@ public class SkyEvents extends JavaPlugin implements Listener, TabExecutor {
         for (Player p : Bukkit.getOnlinePlayers()) sound(p, Sound.UI_TOAST_CHALLENGE_COMPLETE);
     }
 
-    /** Sperrt Portale in Dimensionen, deren Event noch nicht gestartet ist. */
-    @EventHandler
-    public void onPortal(PlayerPortalEvent e) {
-        if (e.getTo() == null || e.getTo().getWorld() == null) return;
-        if (getConfig().getBoolean("admins-umgehen-sperre", true) && e.getPlayer().hasPermission("skyevents.admin")) return;
-        World.Environment env = e.getTo().getWorld().getEnvironment();
+    // ------------------------------------------------------------ Sperren
+
+    /** Event, das diese Dimension gerade sperrt (oder null). */
+    private String closedEvent(World.Environment env) {
+        if (env == null) return null;
         for (String k : eventKeys()) {
             ConfigurationSection s = ev(k);
-            if (s.getBoolean("ausgefuehrt") || !s.getBoolean("portal-sperren", false)) continue;
-            if (!env.name().equalsIgnoreCase(s.getString("dimension", ""))) continue;
-            e.setCancelled(true);
-            LocalDateTime t = eventTime(k);
-            e.getPlayer().sendMessage(c(getConfig().getString("gesperrt", "%event% &cist noch nicht offen! &7Öffnet: &e%zeit%")
-                    .replace("%event%", name(k)).replace("%zeit%", t == null ? "?" : t.format(fmt))));
-            return;
+            if (!s.getBoolean("ausgefuehrt") && s.getBoolean("portal-sperren", false)
+                    && env.name().equalsIgnoreCase(s.getString("dimension", ""))) return k;
         }
+        return null;
+    }
+
+    private boolean bypass(Player p) {
+        return p != null && getConfig().getBoolean("admins-umgehen-sperre") && p.hasPermission("skyevents.admin");
+    }
+
+    private void lockedMsg(Player p, String k) {
+        LocalDateTime t = eventTime(k);
+        p.sendMessage(c(getConfig().getString("gesperrt", "%event% &cist noch nicht offen! &7Öffnet: &e%zeit%")
+                .replace("%event%", name(k)).replace("%zeit%", t == null ? "?" : t.format(fmt))));
+    }
+
+    /** Durch Portale gehen (auch schon gebaute) ist gesperrt. */
+    @EventHandler(ignoreCancelled = true)
+    public void onPortal(PlayerPortalEvent e) {
+        if (bypass(e.getPlayer()) || e.getFrom().getWorld() == null) return;
+        World.Environment from = e.getFrom().getWorld().getEnvironment();
+        World.Environment target = switch (e.getCause()) {
+            case NETHER_PORTAL -> from == World.Environment.NETHER ? World.Environment.NORMAL : World.Environment.NETHER;
+            case END_PORTAL -> from == World.Environment.THE_END ? World.Environment.NORMAL : World.Environment.THE_END;
+            default -> e.getTo() != null && e.getTo().getWorld() != null ? e.getTo().getWorld().getEnvironment() : null;
+        };
+        String k = closedEvent(target);
+        if (k != null) { e.setCancelled(true); lockedMsg(e.getPlayer(), k); }
+    }
+
+    /** Enderaugen können nicht in den Portalrahmen gelegt werden. */
+    @EventHandler
+    public void onEye(PlayerInteractEvent e) {
+        if (e.getAction() != Action.RIGHT_CLICK_BLOCK || e.getClickedBlock() == null || e.getItem() == null) return;
+        if (e.getClickedBlock().getType() != Material.END_PORTAL_FRAME || e.getItem().getType() != Material.ENDER_EYE) return;
+        if (bypass(e.getPlayer())) return;
+        String k = closedEvent(World.Environment.THE_END);
+        if (k != null) { e.setCancelled(true); lockedMsg(e.getPlayer(), k); }
+    }
+
+    /** Netherportale können nicht angezündet werden. */
+    @EventHandler(ignoreCancelled = true)
+    public void onPortalCreate(PortalCreateEvent e) {
+        if (e.getReason() != PortalCreateEvent.CreateReason.FIRE) return;
+        Player p = e.getEntity() instanceof Player pl ? pl : null;
+        if (bypass(p)) return;
+        String k = closedEvent(World.Environment.NETHER);
+        if (k == null) return;
+        e.setCancelled(true);
+        if (p != null) lockedMsg(p, k);
+    }
+
+    // ------------------------------------------------------------ Zeit per Chat / Befehl
+
+    @EventHandler
+    public void onChat(AsyncPlayerChatEvent e) {
+        String k = awaitingTime.remove(e.getPlayer().getUniqueId());
+        if (k == null) return;
+        e.setCancelled(true);
+        String text = e.getMessage().trim();
+        Player p = e.getPlayer();
+        later(() -> setTime(p, k, text, true));
+    }
+
+    private void setTime(Player p, String k, String text, boolean reopen) {
+        if (text.equalsIgnoreCase("abbrechen")) { p.sendMessage(c("&7Abgebrochen.")); return; }
+        LocalDateTime t;
+        try { t = LocalDateTime.parse(text, fmt); }
+        catch (Exception ex) { p.sendMessage(c("&cFalsches Format. Beispiel: &e" + now().plusDays(1).withHour(18).withMinute(0).format(fmt))); return; }
+        if (!t.isAfter(now())) { p.sendMessage(c("&cDie Zeit muss in der Zukunft liegen.")); return; }
+        ev(k).set("zeit", t.format(fmt));
+        ev(k).set("ausgefuehrt", false);
+        saveConfig();
+        clearWarned(k);
+        p.sendMessage(c(name(k) + " &7öffnet jetzt am &e" + t.format(fmt)));
+        if (reopen) openSettings(p);
+    }
+
+    // ------------------------------------------------------------ Bossbar
+
+    private void showBar(String k, long sec, int bm) {
+        BossBar b = bars.computeIfAbsent(k, x -> {
+            BarColor col;
+            try { col = BarColor.valueOf(ev(k).getString("bossbar-farbe", "PURPLE").toUpperCase()); }
+            catch (Exception ex) { col = BarColor.PURPLE; }
+            return Bukkit.createBossBar("", col, BarStyle.SOLID);
+        });
+        b.setTitle(c(getConfig().getString("bossbar-text", "%event% &föffnet in &e%zeit%")
+                .replace("%event%", name(k)).replace("%zeit%", left(Duration.ofSeconds(sec)))));
+        b.setProgress(Math.max(0.0, Math.min(1.0, sec / (bm * 60.0))));
+        for (Player p : Bukkit.getOnlinePlayers()) if (!b.getPlayers().contains(p)) b.addPlayer(p);
+    }
+
+    private void removeBar(String k) {
+        BossBar b = bars.remove(k);
+        if (b != null) b.removeAll();
     }
 
     // ------------------------------------------------------------ Scoreboard "time"

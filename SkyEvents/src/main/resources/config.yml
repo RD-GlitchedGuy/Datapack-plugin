@@ -64,7 +64,12 @@ settings-menue-titel: "&cEvent-Einstellungen"
 warnungen-minuten: [60, 10, 5, 1]
 warnung: "%event% &7startet in &e%min% &7Minute(n)!"
 gesperrt: "%event% &cist noch nicht offen! &7Öffnet: &e%zeit%"
-admins-umgehen-sperre: true
+# true = Admins/OPs dürfen trotz Sperre rein (zum Testen auf false lassen!)
+admins-umgehen-sperre: false
+# Text der Bossbar vor einem Event (%event%, %zeit%)
+bossbar-text: "%event% &föffnet in &e%zeit%"
+# Zeit direkt setzen: /event settings <event> <dd.MM.yyyy> <HH:mm>
+#   oder im /event settings Menü auf das Event klicken und die Zeit in den Chat schreiben
 
 events:
   nether:
@@ -73,6 +78,9 @@ events:
     zeit: "01.11.2026 18:00"
     dimension: NETHER
     portal-sperren: true
+    # Minuten vorher Bossbar zeigen (0 = keine)
+    bossbar-minuten: 0
+    bossbar-farbe: RED
     nachricht: "%event% &aist jetzt offen!"
     befehle:
       - "function events:nether_open"
@@ -83,6 +91,8 @@ events:
     zeit: "08.11.2026 18:00"
     dimension: THE_END
     portal-sperren: true
+    bossbar-minuten: 120
+    bossbar-farbe: PURPLE
     nachricht: "%event% &aist jetzt offen!"
     befehle:
       - "function events:end_open"
